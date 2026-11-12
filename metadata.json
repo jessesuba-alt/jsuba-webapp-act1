@@ -1,0 +1,6 @@
+{
+  "name": "SuVault",
+  "description": "Secure client file portal for freelancers, designers, and clients to upload, manage, and share project deliverables.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

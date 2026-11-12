@@ -1,0 +1,48 @@
+{
+  "users": [
+    {
+      "id": "usr_designer_01",
+      "email": "designer@suvault.com",
+      "passwordHash": "6aa777182ed625820b8a5d90c7c7e8f9e2415f3bc7a5dba3a286e360d3b56fef0a4e9cc9c294d79c9ab54be55601cf5e250ed3febc8ae8858a99abf1db2cc714",
+      "salt": "71e5349c2f4b774dffae1d4aa58c2628",
+      "name": "Alex Morgan",
+      "role": "freelancer",
+      "company": "Studio Aurora Design",
+      "createdAt": "2026-11-12T09:29:19.692Z"
+    },
+    {
+      "id": "usr_client_02",
+      "email": "client@acme.com",
+      "passwordHash": "f6903916ead6ec31223496d8a8a0558e42f97c5dc47ad238e22a8e1368a6704bf548a37520def2f5adfcef9e17e55abeb3476669775e555dc1c1abaee5f49c8b",
+      "salt": "e55b92907ca08d6e982ebf8b50c969f0",
+      "name": "Sarah Chen",
+      "role": "client",
+      "company": "Acme Corporation",
+      "createdAt": "2026-11-12T09:29:19.755Z"
+    }
+  ],
+  "files": [
+    {
+      "id": "file_demo_01",
+      "userId": "usr_designer_01",
+      "originalName": "design_system_preview.txt",
+      "storedFilename": "seed_1794475759755_design_system.txt",
+      "mimeType": "text/plain",
+      "size": 75,
+      "uploadedAt": "2026-11-10T09:29:19.756Z",
+      "category": "Design",
+      "notes": "Initial typography, color palettes, and component spec sheet."
+    }
+  ],
+  "portals": [],
+  "sessions": {
+    "10c767867cde8c2f2e8d192e3403302910d67c840effeabe0d57519cfa767de8": {
+      "userId": "usr_designer_01",
+      "expiresAt": 1795080578349
+    },
+    "f2b6685f74c2775ba0495ca30fde3dfa1b7c5927f7b64d716a2998721ac49161": {
+      "userId": "usr_designer_01",
+      "expiresAt": 1795081178972
+    }
+  }
+}

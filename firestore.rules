@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Catch-All Safety Net: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation helper for user profile documents
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'email', 'name', 'role', 'createdAt'])
+        && data.keys().hasOnly(['id', 'email', 'name', 'role', 'company', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.email is string && data.email.size() <= 128
+        && data.name is string && data.name.size() <= 100
+        && (data.role == 'freelancer' || data.role == 'client')
+        && (!('company' in data) || (data.company is string && data.company.size() <= 100))
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    // Validation helper for vault file metadata documents
+    function isValidFile(data) {
+      return data.keys().hasAll(['id', 'userId', 'originalName', 'storedFilename', 'mimeType', 'size', 'uploadedAt', 'category'])
+        && data.keys().hasOnly(['id', 'userId', 'originalName', 'storedFilename', 'mimeType', 'size', 'uploadedAt', 'category', 'notes', 'clientPortalId'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId.size() <= 128
+        && data.originalName is string && data.originalName.size() <= 255
+        && data.storedFilename is string && data.storedFilename.size() <= 255
+        && data.mimeType is string && data.mimeType.size() <= 100
+        && data.size is number && data.size >= 0 && data.size <= 52428800
+        && data.uploadedAt is string && data.uploadedAt.size() <= 64
+        && (data.category in ['Deliverable', 'Design', 'Image', 'Document', 'Other'])
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!('clientPortalId' in data) || (data.clientPortalId is string && data.clientPortalId.size() <= 128));
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'company'])
+        && incoming().id == existing().id
+        && incoming().email == existing().email;
+      allow delete: if false;
+    }
+
+    // Files Collection
+    match /files/{fileId} {
+      allow get: if isSignedIn() && isValidId(fileId) && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(fileId) && incoming().userId == request.auth.uid && isValidFile(incoming());
+      allow update: if isSignedIn() && isValidId(fileId) && existing().userId == request.auth.uid && isValidFile(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['notes', 'category'])
+        && incoming().userId == existing().userId
+        && incoming().id == existing().id;
+      allow delete: if isSignedIn() && isValidId(fileId) && resource.data.userId == request.auth.uid;
+    }
+  }
+}

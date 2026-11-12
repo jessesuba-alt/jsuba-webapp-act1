@@ -1,0 +1,109 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "Authenticated SuVault client or freelancer account profile",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the user",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the user",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the user",
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "description": "User role: freelancer or client",
+          "enum": ["freelancer", "client"]
+        },
+        "company": {
+          "type": "string",
+          "description": "Optional studio or company name",
+          "maxLength": 100
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of account creation",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "email", "name", "role", "createdAt"]
+    },
+    "files": {
+      "title": "VaultFile",
+      "description": "Metadata for a file stored securely in SuVault",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the file record",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID",
+          "maxLength": 128
+        },
+        "originalName": {
+          "type": "string",
+          "description": "Original file name",
+          "maxLength": 255
+        },
+        "storedFilename": {
+          "type": "string",
+          "description": "Stored physical file identifier",
+          "maxLength": 255
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "MIME type of the file",
+          "maxLength": 100
+        },
+        "size": {
+          "type": "number",
+          "description": "File size in bytes"
+        },
+        "uploadedAt": {
+          "type": "string",
+          "description": "ISO timestamp of upload",
+          "maxLength": 64
+        },
+        "category": {
+          "type": "string",
+          "description": "File category tag",
+          "enum": ["Deliverable", "Design", "Image", "Document", "Other"]
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional client note or instruction",
+          "maxLength": 1000
+        },
+        "clientPortalId": {
+          "type": "string",
+          "description": "Optional portal access identifier",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "userId", "originalName", "storedFilename", "mimeType", "size", "uploadedAt", "category"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "User accounts with isolated ownership"
+    },
+    "/files/{fileId}": {
+      "schema": "files",
+      "description": "Encrypted file records where userId matches the authenticated user"
+    }
+  }
+}
