@@ -1,241 +1,698 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthPage } from './pages/AuthPage';
-import { Sidebar } from './components/Sidebar';
-import { TopNavbar } from './components/TopNavbar';
-import { FileUploadArea } from './components/FileUploadArea';
-import { FileList } from './components/FileList';
-import { FilePreviewModal } from './components/FilePreviewModal';
+import { Navbar } from './components/Navbar';
+import { OnboardingView } from './components/OnboardingView';
+import { EnvironmentBar } from './components/EnvironmentBar';
+import { WorkoutTab } from './components/WorkoutTab';
+import { DietTab } from './components/DietTab';
+import { ProgressTab } from './components/ProgressTab';
+import { PreferencesTab } from './components/PreferencesTab';
+import { WorkoutModal } from './components/WorkoutModal';
+import { MealModal } from './components/MealModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
-import { ClientPortalModal } from './components/ClientPortalModal';
-import { StorageView } from './components/StorageView';
-import type { VaultFile, StorageStats } from './types';
-import { Loader2, Zap, FolderUp, ShieldCheck } from 'lucide-react';
+import {
+  deleteMeal,
+  deleteWorkout,
+  saveCustomMeal,
+  saveCustomWorkout,
+  saveGuidedWorkoutProgress,
+  subscribeToMeals,
+  subscribeToWorkouts,
+  toggleCustomMealCheck,
+  toggleGuidedMealCheck,
+  updateCustomWorkoutProgress,
+} from './services/fitnessService';
+import { getTodayIso } from './utils/fitnessLimits';
+import {
+  loadCachedMeals,
+  loadCachedWorkouts,
+  saveCachedMeals,
+  saveCachedWorkouts,
+} from './utils/localCache';
+import type {
+  ActiveTab,
+  CustomMealInput,
+  CustomWorkoutInput,
+  FitnessGoal,
+  FoodEnvironment,
+  GuidedMealTemplate,
+  GuidedWorkoutTemplate,
+  MealEntry,
+  WorkoutEnvironment,
+  WorkoutRoutine,
+} from './types';
 
-function Dashboard() {
-  const { user, token } = useAuth();
+function WorkspaceApp() {
+  const {
+    firebaseUser,
+    profile,
+    isAuthReady,
+    cloudSyncNotice,
+    dismissCloudSyncNotice,
+    setCloudSyncNotice,
+    logout,
+    setPreferences,
+    setWaterCups,
+    toggleDateLogged,
+    markTodayLogged,
+  } = useAuth();
 
-  const [files, setFiles] = useState<VaultFile[]>([]);
-  const [stats, setStats] = useState<StorageStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [currentView, setCurrentView] = useState<'all' | 'recent' | 'portals' | 'storage'>('all');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('workout');
+  const [workouts, setWorkouts] = useState<WorkoutRoutine[]>([]);
+  const [meals, setMeals] = useState<MealEntry[]>([]);
 
   // Modals
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<VaultFile | null>(null);
-  const [fileToDelete, setFileToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isWorkoutModalOpen, setIsWorkoutModalOpen] = useState(false);
+  const [editingWorkout, setEditingWorkout] = useState<WorkoutRoutine | null>(null);
+  const [isMealModalOpen, setIsMealModalOpen] = useState(false);
+  const [editingMeal, setEditingMeal] = useState<MealEntry | null>(null);
+
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'workout' | 'meal';
+    id: string;
+    title: string;
+  } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isPortalModalOpen, setIsPortalModalOpen] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  // Fetch files and storage stats
-  const fetchData = async () => {
-    if (!token) return;
-    try {
-      const [filesRes, statsRes] = await Promise.all([
-        fetch('/api/files', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/stats', { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-
-      if (filesRes.ok) {
-        const filesData = await filesRes.json();
-        setFiles(filesData.files || []);
-      }
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        setStats(statsData);
-      }
-    } catch (err) {
-      console.error('Failed to load vault data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   useEffect(() => {
-    fetchData();
-  }, [token]);
+    if (!firebaseUser) {
+      setWorkouts([]);
+      setMeals([]);
+      return;
+    }
 
-  // Handle file upload callback
-  const handleUploadSuccess = (newFiles: VaultFile[]) => {
-    setFiles(prev => [...newFiles, ...prev]);
-    fetchData(); // Refresh stats
+    // Load instant local cache first so UI never waits on Firestore
+    setWorkouts(loadCachedWorkouts(firebaseUser.uid));
+    setMeals(loadCachedMeals(firebaseUser.uid));
+
+    const unsubWorkouts = subscribeToWorkouts(
+      firebaseUser.uid,
+      (items) => {
+        setWorkouts((prev) => {
+          // Merge remote items with any newer local-only edits
+          const map = new Map<string, WorkoutRoutine>();
+          prev.forEach((w) => map.set(w.id, w));
+          items.forEach((remote) => {
+            const local = map.get(remote.id);
+            if (!local || remote.updatedAt >= local.updatedAt) {
+              map.set(remote.id, remote);
+            }
+          });
+          const merged = Array.from(map.values()).sort(
+            (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+          );
+          saveCachedWorkouts(firebaseUser.uid, merged);
+          return merged;
+        });
+      },
+      (err) => {
+        console.warn('Workout cloud listener notice:', err.message);
+      }
+    );
+
+    const unsubMeals = subscribeToMeals(
+      firebaseUser.uid,
+      (items) => {
+        setMeals((prev) => {
+          const map = new Map<string, MealEntry>();
+          prev.forEach((m) => map.set(m.id, m));
+          items.forEach((remote) => {
+            const local = map.get(remote.id);
+            if (!local || remote.updatedAt >= local.updatedAt) {
+              map.set(remote.id, remote);
+            }
+          });
+          const merged = Array.from(map.values()).sort(
+            (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+          );
+          saveCachedMeals(firebaseUser.uid, merged);
+          return merged;
+        });
+      },
+      (err) => {
+        console.warn('Meals cloud listener notice:', err.message);
+      }
+    );
+
+    return () => {
+      unsubWorkouts();
+      unsubMeals();
+    };
+  }, [firebaseUser]);
+
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#FFFFFF] flex items-center justify-center p-6">
+        <div className="border border-[#E5E5E5] bg-[#FAFAFA] px-6 py-4 rounded-[2px] font-mono text-xs uppercase tracking-widest text-[#737373]">
+          Initializing KINETIC FORM...
+        </div>
+      </div>
+    );
+  }
+
+  if (!firebaseUser || !profile) {
+    return <AuthPage />;
+  }
+
+  const runCloudTask = (task: () => Promise<unknown>, fallbackLabel: string) => {
+    void (async () => {
+      try {
+        await task();
+      } catch (err) {
+        console.warn(`${fallbackLabel} deferred:`, err);
+        setCloudSyncNotice(
+          'Saved locally on this device. Cloud sync paused — check your connection or Firebase rules.'
+        );
+      }
+    })();
   };
 
-  // Handle delete confirmation
-  const handleDeleteConfirm = async () => {
-    if (!fileToDelete || !token) return;
-    setIsDeleting(true);
-
-    try {
-      const res = await fetch(`/api/files/${fileToDelete.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (res.ok) {
-        setFiles(prev => prev.filter(f => f.id !== fileToDelete.id));
-        setFileToDelete(null);
-        fetchData(); // Refresh stats
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Failed to delete file.');
-      }
-    } catch (err) {
-      alert('Network error while deleting file.');
-    } finally {
-      setIsDeleting(false);
+  // Unified tab switch handler: works even if user was still on onboarding
+  const handleSelectTab = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    if (!profile.onboarded) {
+      setPreferences({ onboarded: true });
     }
   };
 
-  // Handle notes update callback
-  const handleUpdateNotes = (fileId: string, notes: string) => {
-    setFiles(prev => prev.map(f => f.id === fileId ? { ...f, notes } : f));
+  // Onboarding completion: synchronous state + localStorage + non-blocking background Firestore sync
+  const handleCompleteOnboarding = (prefs: {
+    goal: FitnessGoal;
+    workoutEnv: WorkoutEnvironment;
+    foodEnv: FoodEnvironment;
+  }) => {
+    setPreferences({ ...prefs, onboarded: true });
+    setActiveTab('workout');
+  };
+
+  // Workout Handlers (Instant State + Local Cache + Non-blocking Firestore Sync)
+  const handleToggleGuidedExercise = (
+    template: GuidedWorkoutTemplate,
+    existing: WorkoutRoutine | undefined,
+    exerciseId: string
+  ) => {
+    const current = existing?.completedExerciseIds || [];
+    const nextIds = current.includes(exerciseId)
+      ? current.filter((id) => id !== exerciseId)
+      : [...current, exerciseId];
+    const allDone = nextIds.length >= template.exercises.length;
+    const now = Date.now();
+    const docId = existing?.id || `${firebaseUser.uid}__w__${template.templateKey}`;
+
+    const updatedRecord: WorkoutRoutine = existing
+      ? {
+          ...existing,
+          completedExerciseIds: nextIds,
+          isCompleted: allDone,
+          lastCompletedDate: allDone ? getTodayIso() : existing.lastCompletedDate,
+          updatedAt: now,
+        }
+      : {
+          id: docId,
+          ownerId: firebaseUser.uid,
+          templateKey: template.templateKey,
+          title: template.title,
+          dayLabel: template.dayLabel,
+          environment: template.environment,
+          targetMuscles: template.targetMuscles,
+          exercises: template.exercises,
+          completedExerciseIds: nextIds,
+          isCompleted: allDone,
+          isCustom: false,
+          lastCompletedDate: allDone ? getTodayIso() : '',
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    setWorkouts((prev) => {
+      const next = prev.some((w) => w.id === docId)
+        ? prev.map((w) => (w.id === docId ? updatedRecord : w))
+        : [updatedRecord, ...prev];
+      saveCachedWorkouts(firebaseUser.uid, next);
+      return next;
+    });
+
+    if (allDone) {
+      markTodayLogged();
+    }
+
+    runCloudTask(
+      () => saveGuidedWorkoutProgress(firebaseUser.uid, template, existing, nextIds, allDone),
+      'Workout exercise sync'
+    );
+  };
+
+  const handleToggleGuidedComplete = (
+    template: GuidedWorkoutTemplate,
+    existing: WorkoutRoutine | undefined
+  ) => {
+    const nextComplete = !(existing?.isCompleted ?? false);
+    const nextIds = nextComplete ? template.exercises.map((e) => e.id) : [];
+    const now = Date.now();
+    const docId = existing?.id || `${firebaseUser.uid}__w__${template.templateKey}`;
+
+    const updatedRecord: WorkoutRoutine = existing
+      ? {
+          ...existing,
+          completedExerciseIds: nextIds,
+          isCompleted: nextComplete,
+          lastCompletedDate: nextComplete ? getTodayIso() : existing.lastCompletedDate,
+          updatedAt: now,
+        }
+      : {
+          id: docId,
+          ownerId: firebaseUser.uid,
+          templateKey: template.templateKey,
+          title: template.title,
+          dayLabel: template.dayLabel,
+          environment: template.environment,
+          targetMuscles: template.targetMuscles,
+          exercises: template.exercises,
+          completedExerciseIds: nextIds,
+          isCompleted: nextComplete,
+          isCustom: false,
+          lastCompletedDate: nextComplete ? getTodayIso() : '',
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    setWorkouts((prev) => {
+      const next = prev.some((w) => w.id === docId)
+        ? prev.map((w) => (w.id === docId ? updatedRecord : w))
+        : [updatedRecord, ...prev];
+      saveCachedWorkouts(firebaseUser.uid, next);
+      return next;
+    });
+
+    if (nextComplete) {
+      markTodayLogged();
+    }
+
+    runCloudTask(
+      () => saveGuidedWorkoutProgress(firebaseUser.uid, template, existing, nextIds, nextComplete),
+      'Workout completion sync'
+    );
+  };
+
+  const handleToggleCustomExercise = (workout: WorkoutRoutine, exerciseId: string) => {
+    const current = workout.completedExerciseIds || [];
+    const nextIds = current.includes(exerciseId)
+      ? current.filter((id) => id !== exerciseId)
+      : [...current, exerciseId];
+    const allDone = workout.exercises.length > 0 && nextIds.length >= workout.exercises.length;
+    const now = Date.now();
+
+    const updated: WorkoutRoutine = {
+      ...workout,
+      completedExerciseIds: nextIds,
+      isCompleted: allDone,
+      lastCompletedDate: allDone ? getTodayIso() : workout.lastCompletedDate,
+      updatedAt: now,
+    };
+
+    setWorkouts((prev) => {
+      const next = prev.map((w) => (w.id === workout.id ? updated : w));
+      saveCachedWorkouts(firebaseUser.uid, next);
+      return next;
+    });
+
+    if (allDone) {
+      markTodayLogged();
+    }
+
+    runCloudTask(
+      () => updateCustomWorkoutProgress(workout, nextIds, allDone),
+      'Custom exercise sync'
+    );
+  };
+
+  const handleToggleCustomComplete = (workout: WorkoutRoutine) => {
+    const nextComplete = !workout.isCompleted;
+    const nextIds = nextComplete ? workout.exercises.map((e) => e.id) : [];
+    const now = Date.now();
+
+    const updated: WorkoutRoutine = {
+      ...workout,
+      completedExerciseIds: nextIds,
+      isCompleted: nextComplete,
+      lastCompletedDate: nextComplete ? getTodayIso() : workout.lastCompletedDate,
+      updatedAt: now,
+    };
+
+    setWorkouts((prev) => {
+      const next = prev.map((w) => (w.id === workout.id ? updated : w));
+      saveCachedWorkouts(firebaseUser.uid, next);
+      return next;
+    });
+
+    if (nextComplete) {
+      markTodayLogged();
+    }
+
+    runCloudTask(
+      () => updateCustomWorkoutProgress(workout, nextIds, nextComplete),
+      'Custom workout sync'
+    );
+  };
+
+  const handleSaveCustomWorkout = async (input: CustomWorkoutInput) => {
+    const existingRecord = input.id ? workouts.find((w) => w.id === input.id) : undefined;
+    const now = Date.now();
+    const localId = existingRecord?.id || `local-w-${now}`;
+    const optimistic: WorkoutRoutine = {
+      id: localId,
+      ownerId: firebaseUser.uid,
+      templateKey: '',
+      title: input.title,
+      dayLabel: input.dayLabel,
+      environment: input.environment,
+      targetMuscles: input.targetMuscles,
+      exercises: input.exercises,
+      completedExerciseIds: existingRecord?.completedExerciseIds || [],
+      isCompleted: existingRecord?.isCompleted || false,
+      isCustom: true,
+      lastCompletedDate: existingRecord?.lastCompletedDate || '',
+      createdAt: existingRecord?.createdAt || now,
+      updatedAt: now,
+    };
+
+    setWorkouts((prev) => {
+      const next = existingRecord
+        ? prev.map((w) => (w.id === existingRecord.id ? optimistic : w))
+        : [optimistic, ...prev];
+      saveCachedWorkouts(firebaseUser.uid, next);
+      return next;
+    });
+
+    runCloudTask(async () => {
+      const saved = await saveCustomWorkout(firebaseUser.uid, input, existingRecord);
+      setWorkouts((prev) => {
+        const next = prev.map((w) => (w.id === localId ? saved : w));
+        saveCachedWorkouts(firebaseUser.uid, next);
+        return next;
+      });
+    }, 'Save custom workout');
+  };
+
+  // Meal Handlers (Instant State + Local Cache + Non-blocking Firestore Sync)
+  const handleToggleGuidedMeal = (
+    template: GuidedMealTemplate,
+    existing: MealEntry | undefined,
+    checkedToday: boolean
+  ) => {
+    const now = Date.now();
+    const docId = existing?.id || `${firebaseUser.uid}__m__${template.templateKey}`;
+    const checkedDate = checkedToday ? getTodayIso() : '';
+
+    const updatedRecord: MealEntry = existing
+      ? {
+          ...existing,
+          checkedDate,
+          updatedAt: now,
+        }
+      : {
+          id: docId,
+          ownerId: firebaseUser.uid,
+          templateKey: template.templateKey,
+          title: template.title,
+          slot: template.slot,
+          foodEnv: template.foodEnv,
+          goal: template.goal,
+          calories: template.calories,
+          protein: template.protein,
+          carbs: template.carbs,
+          fat: template.fat,
+          prepNotes: template.prepNotes,
+          checkedDate,
+          isCustom: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    setMeals((prev) => {
+      const next = prev.some((m) => m.id === docId)
+        ? prev.map((m) => (m.id === docId ? updatedRecord : m))
+        : [updatedRecord, ...prev];
+      saveCachedMeals(firebaseUser.uid, next);
+      return next;
+    });
+
+    runCloudTask(
+      () => toggleGuidedMealCheck(firebaseUser.uid, template, existing, checkedToday),
+      'Meal check sync'
+    );
+  };
+
+  const handleToggleCustomMeal = (meal: MealEntry, checkedToday: boolean) => {
+    const updated: MealEntry = {
+      ...meal,
+      checkedDate: checkedToday ? getTodayIso() : '',
+      updatedAt: Date.now(),
+    };
+
+    setMeals((prev) => {
+      const next = prev.map((m) => (m.id === meal.id ? updated : m));
+      saveCachedMeals(firebaseUser.uid, next);
+      return next;
+    });
+
+    runCloudTask(() => toggleCustomMealCheck(meal, checkedToday), 'Custom meal check sync');
+  };
+
+  const handleSaveCustomMeal = async (input: CustomMealInput) => {
+    const existingRecord = input.id ? meals.find((m) => m.id === input.id) : undefined;
+    const now = Date.now();
+    const localId = existingRecord?.id || `local-m-${now}`;
+    const optimistic: MealEntry = {
+      id: localId,
+      ownerId: firebaseUser.uid,
+      templateKey: '',
+      title: input.title,
+      slot: input.slot,
+      foodEnv: input.foodEnv,
+      goal: input.goal,
+      calories: input.calories,
+      protein: input.protein,
+      carbs: input.carbs,
+      fat: input.fat,
+      prepNotes: input.prepNotes,
+      checkedDate: existingRecord?.checkedDate || '',
+      isCustom: true,
+      createdAt: existingRecord?.createdAt || now,
+      updatedAt: now,
+    };
+
+    setMeals((prev) => {
+      const next = existingRecord
+        ? prev.map((m) => (m.id === existingRecord.id ? optimistic : m))
+        : [optimistic, ...prev];
+      saveCachedMeals(firebaseUser.uid, next);
+      return next;
+    });
+
+    runCloudTask(async () => {
+      const saved = await saveCustomMeal(firebaseUser.uid, input, existingRecord);
+      setMeals((prev) => {
+        const next = prev.map((m) => (m.id === localId ? saved : m));
+        saveCachedMeals(firebaseUser.uid, next);
+        return next;
+      });
+    }, 'Save custom meal');
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    const target = deleteTarget;
+
+    if (target.type === 'workout') {
+      setWorkouts((prev) => {
+        const next = prev.filter((w) => w.id !== target.id);
+        saveCachedWorkouts(firebaseUser.uid, next);
+        return next;
+      });
+      if (!target.id.startsWith('local-w-')) {
+        runCloudTask(() => deleteWorkout(target.id), 'Delete workout');
+      }
+    } else {
+      setMeals((prev) => {
+        const next = prev.filter((m) => m.id !== target.id);
+        saveCachedMeals(firebaseUser.uid, next);
+        return next;
+      });
+      if (!target.id.startsWith('local-m-')) {
+        runCloudTask(() => deleteMeal(target.id), 'Delete meal');
+      }
+    }
+
+    setIsDeleting(false);
+    setDeleteTarget(null);
   };
 
   return (
-    <div className="min-h-screen bg-[#050507] cyber-grid flex flex-col md:flex-row relative text-white">
-      {/* Background Soft Monochromatic Silver Glows */}
-      <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-white/[0.03] rounded-full blur-[140px] pointer-events-none -z-10" />
-      <div className="fixed bottom-0 left-64 w-[500px] h-[500px] bg-white/[0.02] rounded-full blur-[140px] pointer-events-none -z-10" />
-
-      {/* Monochromatic Cyber Sidebar */}
-      <div className={`${mobileMenuOpen ? 'block' : 'hidden'} md:block fixed md:static inset-0 z-40 bg-black/75 md:bg-transparent`}>
-        <div className="w-64 md:w-72 h-full" onClick={(e) => e.stopPropagation()}>
-          <Sidebar
-            currentView={currentView}
-            setCurrentView={(view) => {
-              setCurrentView(view);
-              setMobileMenuOpen(false);
-            }}
-            stats={stats}
-            onOpenUpload={() => setIsUploadModalOpen(true)}
-            onOpenPortalModal={() => setIsPortalModalOpen(true)}
-          />
-        </div>
-      </div>
-
-      {/* Main Content Area */}
-      <main className="flex-1 min-w-0 flex flex-col min-h-screen">
-        <TopNavbar
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          onOpenUpload={() => setIsUploadModalOpen(true)}
-          mobileMenuOpen={mobileMenuOpen}
-          setMobileMenuOpen={setMobileMenuOpen}
-          currentView={currentView}
-        />
-
-        <div className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* Top Monochromatic Action Banner */}
-          <div className="rounded-3xl p-6 sm:p-7 bg-gradient-to-r from-zinc-950 via-zinc-900 to-black border border-white/20 cyber-panel shadow-[0_0_30px_rgba(255,255,255,0.06)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="font-cyber uppercase font-bold tracking-wider text-white bg-zinc-900 border border-white/30 px-2 py-0.5 rounded-md">
-                  SUVAULT_MONOCHROME_CORE
-                </span>
-                <span className="text-zinc-600">//</span>
-                <span className="text-zinc-300 font-medium flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-white" />
-                  ISOLATED VAULT ONLINE
-                </span>
-              </div>
-              <h2 className="font-cyber text-xl sm:text-2xl font-bold text-white neon-glow-silver">
-                {user?.role === 'freelancer' ? `WELCOME // ${user.name.toUpperCase()}` : `CLIENT_PORTAL // ${user?.name.toUpperCase()}`}
-              </h2>
-              <p className="text-xs font-mono text-zinc-300 max-w-2xl">
-                {user?.role === 'freelancer'
-                  ? 'Manage client deliverables, upload creative design packages, or generate dedicated client upload links.'
-                  : 'Review delivered design assets, download approved project files, and upload feedback.'}
-              </p>
-            </div>
-
-            <button
-              onClick={() => setIsUploadModalOpen(true)}
-              className="px-4 py-2.5 chrome-btn font-cyber font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
-            >
-              <FolderUp className="w-4 h-4 stroke-[3]" />
-              <span>Upload Data</span>
-            </button>
-          </div>
-
-          {/* Conditional View Rendering */}
-          {isLoading ? (
-            <div className="p-16 flex flex-col items-center justify-center space-y-3 cyber-card rounded-2xl border border-white/15">
-              <Loader2 className="w-8 h-8 text-white animate-spin" />
-              <p className="text-xs font-mono text-zinc-300 font-medium">CONNECTING TO SECURE VAULT PARTITION...</p>
-            </div>
-          ) : currentView === 'storage' ? (
-            <StorageView stats={stats} onOpenUpload={() => setIsUploadModalOpen(true)} />
-          ) : (
-            <>
-              {/* File Upload Area on Main Dashboard */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-cyber text-sm font-bold text-white flex items-center gap-2 neon-glow-silver">
-                    <Zap className="w-4 h-4 text-white fill-white" />
-                    <span>QUICK_FILE_UPLOAD.SYS</span>
-                  </h3>
-                  <span className="text-xs font-mono text-zinc-400">Drag and drop files to encrypt</span>
-                </div>
-                <FileUploadArea onUploadSuccess={handleUploadSuccess} />
-              </div>
-
-              {/* Uploaded Files List */}
-              <div className="space-y-3 pt-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-cyber text-base font-bold text-white tracking-wide">
-                      {currentView === 'recent' ? 'RECENT_UPLOADS.LOG' : 'COMMITTED_VAULT_FILES'}
-                    </h3>
-                    <p className="text-xs font-mono text-zinc-400">
-                      Showing encrypted files with size metrics, timestamps, and client action tools
-                    </p>
-                  </div>
-                </div>
-
-                <FileList
-                  files={currentView === 'recent' ? files.slice(0, 5) : files}
-                  searchQuery={searchQuery}
-                  viewMode={viewMode}
-                  onDeleteFile={(id, name) => setFileToDelete({ id, name })}
-                  onPreviewFile={(file) => setPreviewFile(file)}
-                  onOpenUpload={() => setIsUploadModalOpen(true)}
-                />
-              </div>
-            </>
-          )}
-        </div>
-      </main>
-
-      {/* Modal Dialogs */}
-      <FileUploadArea
-        isOpenModal={isUploadModalOpen}
-        onCloseModal={() => setIsUploadModalOpen(false)}
-        onUploadSuccess={handleUploadSuccess}
+    <div className="min-h-screen bg-[#FFFFFF] text-[#0A0A0A] flex flex-col">
+      <Navbar
+        profile={profile}
+        activeTab={activeTab}
+        onChangeTab={handleSelectTab}
+        onLogout={logout}
       />
 
-      <FilePreviewModal
-        file={previewFile}
-        onClose={() => setPreviewFile(null)}
-        onUpdateNotes={handleUpdateNotes}
+      {!profile.onboarded ? (
+        <main className="flex-1">
+          <OnboardingView
+            initialGoal={profile.goal}
+            initialWorkoutEnv={profile.workoutEnv}
+            initialFoodEnv={profile.foodEnv}
+            displayName={profile.displayName}
+            onComplete={handleCompleteOnboarding}
+          />
+        </main>
+      ) : (
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+          <EnvironmentBar profile={profile} onUpdatePrefs={setPreferences} />
+
+          {cloudSyncNotice && (
+            <div
+              role="status"
+              className="border border-[#E5E5E5] bg-[#FAFAFA] px-4 py-2.5 rounded-[2px] flex items-center justify-between gap-4"
+            >
+              <p className="text-xs text-[#555555]">{cloudSyncNotice}</p>
+              <button
+                type="button"
+                onClick={dismissCloudSyncNotice}
+                className="font-mono text-[11px] uppercase tracking-wider text-[#0A0A0A] underline shrink-0 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'workout' && (
+            <WorkoutTab
+              environment={profile.workoutEnv}
+              workouts={workouts}
+              onToggleGuidedExercise={handleToggleGuidedExercise}
+              onToggleGuidedComplete={handleToggleGuidedComplete}
+              onToggleCustomExercise={handleToggleCustomExercise}
+              onToggleCustomComplete={handleToggleCustomComplete}
+              onOpenCreateWorkout={() => {
+                setEditingWorkout(null);
+                setIsWorkoutModalOpen(true);
+              }}
+              onEditWorkout={(w) => {
+                setEditingWorkout(w);
+                setIsWorkoutModalOpen(true);
+              }}
+              onRequestDeleteWorkout={(w) =>
+                setDeleteTarget({ type: 'workout', id: w.id, title: w.title })
+              }
+            />
+          )}
+
+          {activeTab === 'diet' && (
+            <DietTab
+              goal={profile.goal}
+              foodEnv={profile.foodEnv}
+              meals={meals}
+              waterCupsToday={profile.waterCupsToday}
+              onUpdateWaterCups={setWaterCups}
+              onToggleGuidedMeal={handleToggleGuidedMeal}
+              onToggleCustomMeal={handleToggleCustomMeal}
+              onOpenCreateMeal={() => {
+                setEditingMeal(null);
+                setIsMealModalOpen(true);
+              }}
+              onEditMeal={(m) => {
+                setEditingMeal(m);
+                setIsMealModalOpen(true);
+              }}
+              onRequestDeleteMeal={(m) =>
+                setDeleteTarget({ type: 'meal', id: m.id, title: m.title })
+              }
+            />
+          )}
+
+          {activeTab === 'progress' && (
+            <ProgressTab
+              profile={profile}
+              workouts={workouts}
+              meals={meals}
+              onToggleDateLogged={toggleDateLogged}
+              onOpenCreateWorkout={() => {
+                setEditingWorkout(null);
+                setIsWorkoutModalOpen(true);
+              }}
+              onEditWorkout={(w) => {
+                setEditingWorkout(w);
+                setIsWorkoutModalOpen(true);
+              }}
+              onRequestDeleteWorkout={(w) =>
+                setDeleteTarget({ type: 'workout', id: w.id, title: w.title })
+              }
+              onOpenCreateMeal={() => {
+                setEditingMeal(null);
+                setIsMealModalOpen(true);
+              }}
+              onEditMeal={(m) => {
+                setEditingMeal(m);
+                setIsMealModalOpen(true);
+              }}
+              onRequestDeleteMeal={(m) =>
+                setDeleteTarget({ type: 'meal', id: m.id, title: m.title })
+              }
+              onOpenPreferences={() => setActiveTab('settings')}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <PreferencesTab
+              profile={profile}
+              onUpdatePrefs={setPreferences}
+              onOpenSetupWizard={() => setPreferences({ onboarded: false })}
+            />
+          )}
+        </main>
+      )}
+
+      <WorkoutModal
+        isOpen={isWorkoutModalOpen}
+        defaultEnvironment={profile.workoutEnv}
+        editingWorkout={editingWorkout}
+        onClose={() => {
+          setIsWorkoutModalOpen(false);
+          setEditingWorkout(null);
+        }}
+        onSave={handleSaveCustomWorkout}
+      />
+
+      <MealModal
+        isOpen={isMealModalOpen}
+        defaultGoal={profile.goal}
+        defaultFoodEnv={profile.foodEnv}
+        editingMeal={editingMeal}
+        onClose={() => {
+          setIsMealModalOpen(false);
+          setEditingMeal(null);
+        }}
+        onSave={handleSaveCustomMeal}
       />
 
       <DeleteConfirmModal
-        isOpen={!!fileToDelete}
-        fileName={fileToDelete?.name || ''}
+        isOpen={Boolean(deleteTarget)}
+        itemType={deleteTarget?.type || 'workout'}
+        title={deleteTarget?.title || ''}
         isDeleting={isDeleting}
-        onConfirm={handleDeleteConfirm}
-        onCancel={() => setFileToDelete(null)}
-      />
-
-      <ClientPortalModal
-        isOpen={isPortalModalOpen}
-        onClose={() => setIsPortalModalOpen(false)}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
       />
     </div>
   );
@@ -244,28 +701,7 @@ function Dashboard() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <WorkspaceApp />
     </AuthProvider>
   );
-}
-
-function AppContent() {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#050507] cyber-grid text-white">
-        <div className="flex flex-col items-center space-y-3">
-          <Loader2 className="w-8 h-8 text-white animate-spin" />
-          <p className="text-xs font-mono tracking-widest uppercase">INITIALIZING SUVAULT CORE...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AuthPage />;
-  }
-
-  return <Dashboard />;
 }

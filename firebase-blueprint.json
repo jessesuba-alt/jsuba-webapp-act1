@@ -1,109 +1,317 @@
 {
   "entities": {
-    "users": {
+    "User": {
       "title": "User",
-      "description": "Authenticated SuVault client or freelancer account profile",
+      "description": "Authenticated KINETIC FORM user profile with persistent goal, training/diet environment preferences, water log, and consistency streak dates.",
       "type": "object",
       "properties": {
-        "id": {
+        "uid": {
           "type": "string",
-          "description": "Unique identifier of the user",
-          "maxLength": 128
+          "description": "Firebase Auth UID matching the document ID."
         },
         "email": {
           "type": "string",
-          "description": "Email address of the user",
-          "maxLength": 128
+          "format": "email",
+          "maxLength": 320,
+          "description": "User email address."
         },
-        "name": {
+        "displayName": {
           "type": "string",
-          "description": "Full name of the user",
-          "maxLength": 100
+          "maxLength": 100,
+          "description": "Display name shown in the navigation bar."
         },
-        "role": {
+        "goal": {
           "type": "string",
-          "description": "User role: freelancer or client",
-          "enum": ["freelancer", "client"]
+          "enum": ["Weight Loss", "Muscle Gain", "General Fitness"],
+          "description": "Selected primary fitness goal."
         },
-        "company": {
+        "workoutEnv": {
           "type": "string",
-          "description": "Optional studio or company name",
-          "maxLength": 100
+          "enum": ["Home", "Gym"],
+          "description": "Active workout environment toggle."
+        },
+        "foodEnv": {
+          "type": "string",
+          "enum": ["Home-Cooked", "On-the-Go"],
+          "description": "Active diet/food environment toggle."
+        },
+        "onboarded": {
+          "type": "boolean",
+          "description": "Whether the user has completed initial preference selection."
+        },
+        "waterCupsToday": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 24,
+          "description": "Number of water cups checked off for lastWaterDate."
+        },
+        "lastWaterDate": {
+          "type": "string",
+          "maxLength": 10,
+          "description": "ISO date YYYY-MM-DD for the active water intake counter."
+        },
+        "completedDates": {
+          "type": "array",
+          "maxItems": 90,
+          "items": {
+            "type": "string",
+            "maxLength": 10
+          },
+          "description": "List of recent YYYY-MM-DD dates marked complete for weekly consistency tracking."
         },
         "createdAt": {
-          "type": "string",
-          "description": "ISO timestamp of account creation",
-          "maxLength": 64
+          "type": "integer",
+          "description": "Unix epoch milliseconds when account was created."
+        },
+        "updatedAt": {
+          "type": "integer",
+          "description": "Unix epoch milliseconds when profile was last updated."
         }
       },
-      "required": ["id", "email", "name", "role", "createdAt"]
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "goal",
+        "workoutEnv",
+        "foodEnv",
+        "onboarded",
+        "waterCupsToday",
+        "lastWaterDate",
+        "completedDates",
+        "createdAt",
+        "updatedAt"
+      ]
     },
-    "files": {
-      "title": "VaultFile",
-      "description": "Metadata for a file stored securely in SuVault",
+    "Workout": {
+      "title": "Workout",
+      "description": "Guided or custom workout routine belonging to a single user.",
       "type": "object",
       "properties": {
-        "id": {
+        "ownerId": {
           "type": "string",
-          "description": "Unique identifier for the file record",
-          "maxLength": 128
+          "description": "UID of the user who owns this workout record."
         },
-        "userId": {
+        "templateKey": {
           "type": "string",
-          "description": "Owner user UID",
-          "maxLength": 128
+          "maxLength": 80,
+          "description": "Optional identifier linking to a built-in guided split routine (empty string for custom workouts)."
         },
-        "originalName": {
+        "title": {
           "type": "string",
-          "description": "Original file name",
-          "maxLength": 255
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Workout routine title."
         },
-        "storedFilename": {
+        "dayLabel": {
           "type": "string",
-          "description": "Stored physical file identifier",
-          "maxLength": 255
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Schedule label such as Day 01 · Monday."
         },
-        "mimeType": {
+        "environment": {
           "type": "string",
-          "description": "MIME type of the file",
-          "maxLength": 100
+          "enum": ["Home", "Gym"],
+          "description": "Workout environment."
         },
-        "size": {
-          "type": "number",
-          "description": "File size in bytes"
-        },
-        "uploadedAt": {
+        "targetMuscles": {
           "type": "string",
-          "description": "ISO timestamp of upload",
-          "maxLength": 64
+          "minLength": 1,
+          "maxLength": 140,
+          "description": "Primary muscle groups targeted."
         },
-        "category": {
-          "type": "string",
-          "description": "File category tag",
-          "enum": ["Deliverable", "Design", "Image", "Document", "Other"]
+        "exercises": {
+          "type": "array",
+          "maxItems": 20,
+          "description": "Ordered list of exercises with sets, reps, rest seconds, cues, and alternatives.",
+          "items": {
+            "type": "object"
+          }
         },
-        "notes": {
-          "type": "string",
-          "description": "Optional client note or instruction",
-          "maxLength": 1000
+        "completedExerciseIds": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": "Exercise IDs checked off in the current session."
         },
-        "clientPortalId": {
+        "isCompleted": {
+          "type": "boolean",
+          "description": "Whether the workout session is marked completed."
+        },
+        "isCustom": {
+          "type": "boolean",
+          "description": "True if user-created custom workout; false if tracked state for a guided split."
+        },
+        "lastCompletedDate": {
           "type": "string",
-          "description": "Optional portal access identifier",
-          "maxLength": 128
+          "maxLength": 10,
+          "description": "Most recent YYYY-MM-DD completion date or empty string."
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Creation timestamp in Unix epoch ms."
+        },
+        "updatedAt": {
+          "type": "integer",
+          "description": "Last update timestamp in Unix epoch ms."
         }
       },
-      "required": ["id", "userId", "originalName", "storedFilename", "mimeType", "size", "uploadedAt", "category"]
+      "required": [
+        "ownerId",
+        "templateKey",
+        "title",
+        "dayLabel",
+        "environment",
+        "targetMuscles",
+        "exercises",
+        "completedExerciseIds",
+        "isCompleted",
+        "isCustom",
+        "lastCompletedDate",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Meal": {
+      "title": "Meal",
+      "description": "Tracked guided meal completion or user-created custom meal entry belonging to a single user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who owns this meal entry."
+        },
+        "templateKey": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Optional identifier linking to a built-in diet template (empty string for custom meals)."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140,
+          "description": "Meal title."
+        },
+        "slot": {
+          "type": "string",
+          "enum": ["Breakfast", "Lunch", "Dinner", "Snack"],
+          "description": "Daily meal slot."
+        },
+        "foodEnv": {
+          "type": "string",
+          "enum": ["Home-Cooked", "On-the-Go"],
+          "description": "Food preparation/sourcing environment."
+        },
+        "goal": {
+          "type": "string",
+          "enum": ["Weight Loss", "Muscle Gain", "General Fitness"],
+          "description": "Target fitness goal."
+        },
+        "calories": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Estimated kilocalories."
+        },
+        "protein": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 400,
+          "description": "Protein in grams."
+        },
+        "carbs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600,
+          "description": "Carbohydrates in grams."
+        },
+        "fat": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300,
+          "description": "Fat in grams."
+        },
+        "prepNotes": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Prep instructions or smart-swap ordering guidance."
+        },
+        "checkedDate": {
+          "type": "string",
+          "maxLength": 10,
+          "description": "YYYY-MM-DD date when this meal was last checked off, or empty string."
+        },
+        "isCustom": {
+          "type": "boolean",
+          "description": "True if user-created custom meal; false if tracked state for a guided meal."
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Creation timestamp in Unix epoch ms."
+        },
+        "updatedAt": {
+          "type": "integer",
+          "description": "Last update timestamp in Unix epoch ms."
+        }
+      },
+      "required": [
+        "ownerId",
+        "templateKey",
+        "title",
+        "slot",
+        "foodEnv",
+        "goal",
+        "calories",
+        "protein",
+        "carbs",
+        "fat",
+        "prepNotes",
+        "checkedDate",
+        "isCustom",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Elevated administrator access record keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "grantedAt": {
+          "type": "integer"
+        }
+      },
+      "required": ["uid"]
     }
+  },
+  "auth": {
+    "providers": ["password", "google.com"]
   },
   "firestore": {
     "/users/{userId}": {
-      "schema": "users",
-      "description": "User accounts with isolated ownership"
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Private user fitness profile, active environment toggles, water counter, and weekly streak log."
     },
-    "/files/{fileId}": {
-      "schema": "files",
-      "description": "Encrypted file records where userId matches the authenticated user"
+    "/workouts/{workoutId}": {
+      "schema": { "$ref": "#/entities/Workout" },
+      "description": "Owner-scoped guided session progress and custom workout routines."
+    },
+    "/meals/{mealId}": {
+      "schema": { "$ref": "#/entities/Meal" },
+      "description": "Owner-scoped guided meal check-offs and custom meal plans."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "Read-only admin roster managed via Firebase Console."
     }
   }
 }

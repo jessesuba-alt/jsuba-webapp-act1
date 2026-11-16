@@ -1,38 +1,123 @@
-export interface User {
-  id: string;
+export type FitnessGoal = 'Weight Loss' | 'Muscle Gain' | 'General Fitness';
+
+export type WorkoutEnvironment = 'Home' | 'Gym';
+
+export type FoodEnvironment = 'Home-Cooked' | 'On-the-Go';
+
+export type MealSlot = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
+
+export type ActiveTab = 'workout' | 'diet' | 'progress' | 'settings';
+
+export interface UserProfile {
+  uid: string;
   email: string;
-  name: string;
-  role: 'freelancer' | 'client';
-  company?: string;
-  createdAt: string;
+  displayName: string;
+  goal: FitnessGoal;
+  workoutEnv: WorkoutEnvironment;
+  foodEnv: FoodEnvironment;
+  onboarded: boolean;
+  waterCupsToday: number;
+  lastWaterDate: string; // YYYY-MM-DD
+  completedDates: string[]; // array of YYYY-MM-DD
+  createdAt: number;
+  updatedAt: number;
 }
 
-export interface VaultFile {
+export interface ExerciseItem {
   id: string;
-  userId: string;
-  originalName: string;
-  storedFilename: string;
-  mimeType: string;
-  size: number;
-  uploadedAt: string;
-  category: 'Design' | 'Document' | 'Image' | 'Deliverable' | 'Other';
-  notes?: string;
-  clientPortalId?: string;
+  name: string;
+  sets: number;
+  reps: string;
+  restSeconds: number;
+  cue: string;
+  alternative: string;
 }
 
-export interface StorageStats {
-  totalFiles: number;
-  totalBytes: number;
-  quotaBytes: number;
-  categoryBreakdown: {
-    [key: string]: {
-      count: number;
-      bytes: number;
-    };
-  };
+export interface WorkoutRoutine {
+  id: string;
+  ownerId: string;
+  templateKey: string; // empty string if custom
+  title: string;
+  dayLabel: string;
+  environment: WorkoutEnvironment;
+  targetMuscles: string;
+  exercises: ExerciseItem[];
+  completedExerciseIds: string[];
+  isCompleted: boolean;
+  isCustom: boolean;
+  lastCompletedDate: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
-export interface AuthResponse {
-  token: string;
-  user: User;
+export interface GuidedWorkoutTemplate {
+  templateKey: string;
+  title: string;
+  dayLabel: string;
+  environment: WorkoutEnvironment;
+  targetMuscles: string;
+  exercises: ExerciseItem[];
+}
+
+export interface MealEntry {
+  id: string;
+  ownerId: string;
+  templateKey: string; // empty string if custom
+  title: string;
+  slot: MealSlot;
+  foodEnv: FoodEnvironment;
+  goal: FitnessGoal;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  prepNotes: string;
+  checkedDate: string; // YYYY-MM-DD when checked off, or ''
+  isCustom: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface GuidedMealTemplate {
+  templateKey: string;
+  title: string;
+  slot: MealSlot;
+  foodEnv: FoodEnvironment;
+  goal: FitnessGoal;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  prepNotes: string;
+}
+
+export interface MacroTargets {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  waterCups: number;
+  guidance: string;
+}
+
+export interface CustomWorkoutInput {
+  id?: string;
+  title: string;
+  dayLabel: string;
+  environment: WorkoutEnvironment;
+  targetMuscles: string;
+  exercises: ExerciseItem[];
+}
+
+export interface CustomMealInput {
+  id?: string;
+  title: string;
+  slot: MealSlot;
+  foodEnv: FoodEnvironment;
+  goal: FitnessGoal;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  prepNotes: string;
 }
