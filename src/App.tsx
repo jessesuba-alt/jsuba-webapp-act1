@@ -51,12 +51,17 @@ import type {
 function WorkspaceApp() {
   const {
     firebaseUser,
+    activeUid,
+    isDemoUser,
+    demoResetNonce,
     profile,
     isAuthReady,
     cloudSyncNotice,
     dismissCloudSyncNotice,
     setCloudSyncNotice,
     logout,
+    resetDemoData,
+    exitDemoMode,
     setPreferences,
     setWaterCups,
     toggleDateLogged,
@@ -81,21 +86,25 @@ function WorkspaceApp() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    if (!firebaseUser) {
+    if (!activeUid) {
       setWorkouts([]);
       setMeals([]);
       return;
     }
 
-    // Load instant local cache first so UI never waits on Firestore
-    setWorkouts(loadCachedWorkouts(firebaseUser.uid));
-    setMeals(loadCachedMeals(firebaseUser.uid));
+    // Load instant local cache first (used exclusively in Demo Mode; also prevents UI flicker for Firebase users)
+    setWorkouts(loadCachedWorkouts(activeUid));
+    setMeals(loadCachedMeals(activeUid));
+
+    // Bypass Firestore listeners completely in Demo Mode ($0 Firebase usage)
+    if (isDemoUser || !firebaseUser) {
+      return;
+    }
 
     const unsubWorkouts = subscribeToWorkouts(
       firebaseUser.uid,
       (items) => {
         setWorkouts((prev) => {
-          // Merge remote items with any newer local-only edits
           const map = new Map<string, WorkoutRoutine>();
           prev.forEach((w) => map.set(w.id, w));
           items.forEach((remote) => {
@@ -144,7 +153,7 @@ function WorkspaceApp() {
       unsubWorkouts();
       unsubMeals();
     };
-  }, [firebaseUser]);
+  }, [activeUid, isDemoUser, firebaseUser, demoResetNonce]);
 
   if (!isAuthReady) {
     return (
@@ -156,11 +165,12 @@ function WorkspaceApp() {
     );
   }
 
-  if (!firebaseUser || !profile) {
+  if (!activeUid || !profile) {
     return <AuthPage />;
   }
 
   const runCloudTask = (task: () => Promise<unknown>, fallbackLabel: string) => {
+    if (isDemoUser || !firebaseUser) return;
     void (async () => {
       try {
         await task();
@@ -181,7 +191,6 @@ function WorkspaceApp() {
     }
   };
 
-  // Onboarding completion: synchronous state + localStorage + non-blocking background Firestore sync
   const handleCompleteOnboarding = (prefs: {
     goal: FitnessGoal;
     workoutEnv: WorkoutEnvironment;
@@ -191,7 +200,7 @@ function WorkspaceApp() {
     setActiveTab('workout');
   };
 
-  // Workout Handlers (Instant State + Local Cache + Non-blocking Firestore Sync)
+  // Workout Handlers
   const handleToggleGuidedExercise = (
     template: GuidedWorkoutTemplate,
     existing: WorkoutRoutine | undefined,
@@ -203,7 +212,7 @@ function WorkspaceApp() {
       : [...current, exerciseId];
     const allDone = nextIds.length >= template.exercises.length;
     const now = Date.now();
-    const docId = existing?.id || `${firebaseUser.uid}__w__${template.templateKey}`;
+    const docId = existing?.id || `${activeUid}__w__${template.templateKey}`;
 
     const updatedRecord: WorkoutRoutine = existing
       ? {
@@ -215,7 +224,7 @@ function WorkspaceApp() {
         }
       : {
           id: docId,
-          ownerId: firebaseUser.uid,
+          ownerId: activeUid,
           templateKey: template.templateKey,
           title: template.title,
           dayLabel: template.dayLabel,
@@ -234,7 +243,7 @@ function WorkspaceApp() {
       const next = prev.some((w) => w.id === docId)
         ? prev.map((w) => (w.id === docId ? updatedRecord : w))
         : [updatedRecord, ...prev];
-      saveCachedWorkouts(firebaseUser.uid, next);
+      saveCachedWorkouts(activeUid, next);
       return next;
     });
 
@@ -243,7 +252,7 @@ function WorkspaceApp() {
     }
 
     runCloudTask(
-      () => saveGuidedWorkoutProgress(firebaseUser.uid, template, existing, nextIds, allDone),
+      () => saveGuidedWorkoutProgress(activeUid, template, existing, nextIds, allDone),
       'Workout exercise sync'
     );
   };
@@ -255,7 +264,7 @@ function WorkspaceApp() {
     const nextComplete = !(existing?.isCompleted ?? false);
     const nextIds = nextComplete ? template.exercises.map((e) => e.id) : [];
     const now = Date.now();
-    const docId = existing?.id || `${firebaseUser.uid}__w__${template.templateKey}`;
+    const docId = existing?.id || `${activeUid}__w__${template.templateKey}`;
 
     const updatedRecord: WorkoutRoutine = existing
       ? {
@@ -267,7 +276,7 @@ function WorkspaceApp() {
         }
       : {
           id: docId,
-          ownerId: firebaseUser.uid,
+          ownerId: activeUid,
           templateKey: template.templateKey,
           title: template.title,
           dayLabel: template.dayLabel,
@@ -286,7 +295,7 @@ function WorkspaceApp() {
       const next = prev.some((w) => w.id === docId)
         ? prev.map((w) => (w.id === docId ? updatedRecord : w))
         : [updatedRecord, ...prev];
-      saveCachedWorkouts(firebaseUser.uid, next);
+      saveCachedWorkouts(activeUid, next);
       return next;
     });
 
@@ -295,7 +304,7 @@ function WorkspaceApp() {
     }
 
     runCloudTask(
-      () => saveGuidedWorkoutProgress(firebaseUser.uid, template, existing, nextIds, nextComplete),
+      () => saveGuidedWorkoutProgress(activeUid, template, existing, nextIds, nextComplete),
       'Workout completion sync'
     );
   };
@@ -318,7 +327,7 @@ function WorkspaceApp() {
 
     setWorkouts((prev) => {
       const next = prev.map((w) => (w.id === workout.id ? updated : w));
-      saveCachedWorkouts(firebaseUser.uid, next);
+      saveCachedWorkouts(activeUid, next);
       return next;
     });
 
@@ -347,7 +356,7 @@ function WorkspaceApp() {
 
     setWorkouts((prev) => {
       const next = prev.map((w) => (w.id === workout.id ? updated : w));
-      saveCachedWorkouts(firebaseUser.uid, next);
+      saveCachedWorkouts(activeUid, next);
       return next;
     });
 
@@ -367,7 +376,7 @@ function WorkspaceApp() {
     const localId = existingRecord?.id || `local-w-${now}`;
     const optimistic: WorkoutRoutine = {
       id: localId,
-      ownerId: firebaseUser.uid,
+      ownerId: activeUid,
       templateKey: '',
       title: input.title,
       dayLabel: input.dayLabel,
@@ -386,28 +395,28 @@ function WorkspaceApp() {
       const next = existingRecord
         ? prev.map((w) => (w.id === existingRecord.id ? optimistic : w))
         : [optimistic, ...prev];
-      saveCachedWorkouts(firebaseUser.uid, next);
+      saveCachedWorkouts(activeUid, next);
       return next;
     });
 
     runCloudTask(async () => {
-      const saved = await saveCustomWorkout(firebaseUser.uid, input, existingRecord);
+      const saved = await saveCustomWorkout(activeUid, input, existingRecord);
       setWorkouts((prev) => {
         const next = prev.map((w) => (w.id === localId ? saved : w));
-        saveCachedWorkouts(firebaseUser.uid, next);
+        saveCachedWorkouts(activeUid, next);
         return next;
       });
     }, 'Save custom workout');
   };
 
-  // Meal Handlers (Instant State + Local Cache + Non-blocking Firestore Sync)
+  // Meal Handlers
   const handleToggleGuidedMeal = (
     template: GuidedMealTemplate,
     existing: MealEntry | undefined,
     checkedToday: boolean
   ) => {
     const now = Date.now();
-    const docId = existing?.id || `${firebaseUser.uid}__m__${template.templateKey}`;
+    const docId = existing?.id || `${activeUid}__m__${template.templateKey}`;
     const checkedDate = checkedToday ? getTodayIso() : '';
 
     const updatedRecord: MealEntry = existing
@@ -418,7 +427,7 @@ function WorkspaceApp() {
         }
       : {
           id: docId,
-          ownerId: firebaseUser.uid,
+          ownerId: activeUid,
           templateKey: template.templateKey,
           title: template.title,
           slot: template.slot,
@@ -439,12 +448,12 @@ function WorkspaceApp() {
       const next = prev.some((m) => m.id === docId)
         ? prev.map((m) => (m.id === docId ? updatedRecord : m))
         : [updatedRecord, ...prev];
-      saveCachedMeals(firebaseUser.uid, next);
+      saveCachedMeals(activeUid, next);
       return next;
     });
 
     runCloudTask(
-      () => toggleGuidedMealCheck(firebaseUser.uid, template, existing, checkedToday),
+      () => toggleGuidedMealCheck(activeUid, template, existing, checkedToday),
       'Meal check sync'
     );
   };
@@ -458,7 +467,7 @@ function WorkspaceApp() {
 
     setMeals((prev) => {
       const next = prev.map((m) => (m.id === meal.id ? updated : m));
-      saveCachedMeals(firebaseUser.uid, next);
+      saveCachedMeals(activeUid, next);
       return next;
     });
 
@@ -471,7 +480,7 @@ function WorkspaceApp() {
     const localId = existingRecord?.id || `local-m-${now}`;
     const optimistic: MealEntry = {
       id: localId,
-      ownerId: firebaseUser.uid,
+      ownerId: activeUid,
       templateKey: '',
       title: input.title,
       slot: input.slot,
@@ -492,15 +501,15 @@ function WorkspaceApp() {
       const next = existingRecord
         ? prev.map((m) => (m.id === existingRecord.id ? optimistic : m))
         : [optimistic, ...prev];
-      saveCachedMeals(firebaseUser.uid, next);
+      saveCachedMeals(activeUid, next);
       return next;
     });
 
     runCloudTask(async () => {
-      const saved = await saveCustomMeal(firebaseUser.uid, input, existingRecord);
+      const saved = await saveCustomMeal(activeUid, input, existingRecord);
       setMeals((prev) => {
         const next = prev.map((m) => (m.id === localId ? saved : m));
-        saveCachedMeals(firebaseUser.uid, next);
+        saveCachedMeals(activeUid, next);
         return next;
       });
     }, 'Save custom meal');
@@ -514,19 +523,19 @@ function WorkspaceApp() {
     if (target.type === 'workout') {
       setWorkouts((prev) => {
         const next = prev.filter((w) => w.id !== target.id);
-        saveCachedWorkouts(firebaseUser.uid, next);
+        saveCachedWorkouts(activeUid, next);
         return next;
       });
-      if (!target.id.startsWith('local-w-')) {
+      if (!target.id.startsWith('local-w-') && !target.id.startsWith('demo-')) {
         runCloudTask(() => deleteWorkout(target.id), 'Delete workout');
       }
     } else {
       setMeals((prev) => {
         const next = prev.filter((m) => m.id !== target.id);
-        saveCachedMeals(firebaseUser.uid, next);
+        saveCachedMeals(activeUid, next);
         return next;
       });
-      if (!target.id.startsWith('local-m-')) {
+      if (!target.id.startsWith('local-m-') && !target.id.startsWith('demo-')) {
         runCloudTask(() => deleteMeal(target.id), 'Delete meal');
       }
     }
@@ -540,8 +549,16 @@ function WorkspaceApp() {
       <Navbar
         profile={profile}
         activeTab={activeTab}
+        isDemoUser={isDemoUser}
         onChangeTab={handleSelectTab}
         onLogout={logout}
+        onResetDemo={() => {
+          resetDemoData();
+        }}
+        onExitDemo={() => {
+          exitDemoMode();
+          setActiveTab('workout');
+        }}
       />
 
       {!profile.onboarded ? (
@@ -558,7 +575,7 @@ function WorkspaceApp() {
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
           <EnvironmentBar profile={profile} onUpdatePrefs={setPreferences} />
 
-          {cloudSyncNotice && (
+          {cloudSyncNotice && !isDemoUser && (
             <div
               role="status"
               className="border border-[#E5E5E5] bg-[#FAFAFA] px-4 py-2.5 rounded-[2px] flex items-center justify-between gap-4"

@@ -19,8 +19,19 @@ import { FirebaseError } from 'firebase/app';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase';
 import { syncUserProfileDocument, upsertUserProfile } from '../services/fitnessService';
+import { createDemoSeedData, DEMO_UID } from '../data/demoSeedData';
 import { FITNESS_LIMITS, getTodayIso } from '../utils/fitnessLimits';
-import { loadCachedProfile, saveCachedProfile } from '../utils/localCache';
+import {
+  clearCachedUserData,
+  isDemoSessionStored,
+  loadCachedMeals,
+  loadCachedProfile,
+  loadCachedWorkouts,
+  saveCachedMeals,
+  saveCachedProfile,
+  saveCachedWorkouts,
+  setDemoSessionStored,
+} from '../utils/localCache';
 import type {
   FitnessGoal,
   FoodEnvironment,
@@ -30,11 +41,17 @@ import type {
 
 interface AuthContextType {
   firebaseUser: FirebaseUser | null;
+  activeUid: string | null;
+  isDemoUser: boolean;
+  demoResetNonce: number;
   profile: UserProfile | null;
   isAuthReady: boolean;
   cloudSyncNotice: string | null;
   dismissCloudSyncNotice: () => void;
   setCloudSyncNotice: (msg: string | null) => void;
+  enterDemoMode: () => void;
+  resetDemoData: () => void;
+  exitDemoMode: () => void;
   signInWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signUpWithEmail: (
     email: string,
@@ -89,16 +106,77 @@ function mapAuthError(err: unknown): string {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [isDemoUser, setIsDemoUser] = useState<boolean>(() => isDemoSessionStored());
+  const [demoResetNonce, setDemoResetNonce] = useState<number>(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
   const [cloudSyncNotice, setCloudSyncNotice] = useState<string | null>(null);
   const latestLocalUpdateRef = useRef<number>(0);
+  const isDemoRef = useRef<boolean>(isDemoUser);
+
+  useEffect(() => {
+    isDemoRef.current = isDemoUser;
+  }, [isDemoUser]);
+
+  const activeUid = isDemoUser ? DEMO_UID : firebaseUser?.uid ?? null;
 
   const dismissCloudSyncNotice = useCallback(() => {
     setCloudSyncNotice(null);
   }, []);
 
+  const hydrateDemoSession = useCallback((forceFresh = false) => {
+    setDemoSessionStored(true);
+    setIsDemoUser(true);
+    setCloudSyncNotice(null);
+
+    if (!forceFresh) {
+      const existingProfile = loadCachedProfile(DEMO_UID);
+      const existingWorkouts = loadCachedWorkouts(DEMO_UID);
+      const existingMeals = loadCachedMeals(DEMO_UID);
+      if (existingProfile && (existingWorkouts.length > 0 || existingMeals.length > 0)) {
+        const today = getTodayIso();
+        const syncedProfile: UserProfile = {
+          ...existingProfile,
+          waterCupsToday:
+            existingProfile.lastWaterDate === today ? existingProfile.waterCupsToday : 0,
+          lastWaterDate: today,
+        };
+        saveCachedProfile(syncedProfile);
+        setProfile(syncedProfile);
+        setIsAuthReady(true);
+        return;
+      }
+    }
+
+    const seed = createDemoSeedData();
+    saveCachedProfile(seed.profile);
+    saveCachedWorkouts(DEMO_UID, seed.workouts);
+    saveCachedMeals(DEMO_UID, seed.meals);
+    setProfile(seed.profile);
+    setDemoResetNonce((n) => n + 1);
+    setIsAuthReady(true);
+  }, []);
+
+  const enterDemoMode = useCallback(() => {
+    hydrateDemoSession(false);
+  }, [hydrateDemoSession]);
+
+  const resetDemoData = useCallback(() => {
+    clearCachedUserData(DEMO_UID);
+    hydrateDemoSession(true);
+  }, [hydrateDemoSession]);
+
+  const exitDemoMode = useCallback(() => {
+    setDemoSessionStored(false);
+    setIsDemoUser(false);
+    setProfile(null);
+    setCloudSyncNotice(null);
+  }, []);
+
   const syncProfileInBackground = useCallback((nextProfile: UserProfile) => {
+    if (isDemoRef.current || nextProfile.uid === DEMO_UID) {
+      return;
+    }
     void (async () => {
       try {
         await syncUserProfileDocument(nextProfile);
@@ -113,6 +191,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
+    // If visitor refreshed while inside Demo Mode, restore locally with zero Firebase reads/writes
+    if (isDemoSessionStored()) {
+      hydrateDemoSession(false);
+    }
+
     let unsubProfile: (() => void) | null = null;
 
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
@@ -122,7 +205,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       setFirebaseUser(user);
+
+      // Keep local Demo Mode active if user explicitly entered Demo Mode and isn't signed into Firebase
+      if (!user && isDemoRef.current) {
+        setIsAuthReady(true);
+        return;
+      }
+
       if (user) {
+        // Real Firebase Auth takes precedence over Demo Mode
+        setDemoSessionStored(false);
+        setIsDemoUser(false);
+
         const email = user.email || '';
         const displayName = user.displayName || email.split('@')[0] || 'Athlete';
         const now = Date.now();
@@ -155,7 +249,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(initialProfile);
         setIsAuthReady(true);
 
-        // Non-blocking initial cloud sync
         void (async () => {
           try {
             const synced = await upsertUserProfile({
@@ -165,7 +258,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               fallbackProfile: loadCachedProfile(user.uid) || initialProfile,
             });
             setProfile((current) => {
-              // Never overwrite newer local user interaction (like clicking Enter Training Dashboard)
               if (current && current.updatedAt > synced.updatedAt) {
                 return current;
               }
@@ -188,7 +280,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const data = snap.data() as UserProfile;
               const resetWater = data.lastWaterDate !== getTodayIso();
               setProfile((current) => {
-                if (current && current.updatedAt > data.updatedAt && latestLocalUpdateRef.current > data.updatedAt) {
+                if (
+                  current &&
+                  current.updatedAt > data.updatedAt &&
+                  latestLocalUpdateRef.current > data.updatedAt
+                ) {
                   return current;
                 }
                 const next: UserProfile = {
@@ -217,7 +313,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubAuth();
       if (unsubProfile) unsubProfile();
     };
-  }, []);
+  }, [hydrateDemoSession]);
 
   const signInWithEmail = async (email: string, password: string) => {
     try {
@@ -267,6 +363,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    if (isDemoUser) {
+      exitDemoMode();
+      return;
+    }
     await signOut(auth);
   };
 
@@ -280,14 +380,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         onboarded: boolean;
       }>
     ) => {
-      if (!firebaseUser) return;
+      if (!activeUid) return;
       const now = Date.now();
       latestLocalUpdateRef.current = now;
       setProfile((prev) => {
         const base: UserProfile = prev || {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          displayName: firebaseUser.displayName || 'Athlete',
+          uid: activeUid,
+          email: isDemoUser ? 'demo@kineticform.local' : firebaseUser?.email || '',
+          displayName: isDemoUser
+            ? 'Alex Mercer (Demo)'
+            : firebaseUser?.displayName || 'Athlete',
           goal: 'General Fitness',
           workoutEnv: 'Home',
           foodEnv: 'Home-Cooked',
@@ -301,9 +403,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const next: UserProfile = {
           ...base,
           ...prefs,
-          displayName: (prefs.displayName ?? base.displayName)
-            .trim()
-            .slice(0, FITNESS_LIMITS.DISPLAY_NAME_MAX) || base.displayName,
+          displayName:
+            (prefs.displayName ?? base.displayName)
+              .trim()
+              .slice(0, FITNESS_LIMITS.DISPLAY_NAME_MAX) || base.displayName,
           updatedAt: now,
         };
         saveCachedProfile(next);
@@ -311,12 +414,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return next;
       });
     },
-    [firebaseUser, syncProfileInBackground]
+    [activeUid, isDemoUser, firebaseUser, syncProfileInBackground]
   );
 
   const setWaterCups = useCallback(
     (cups: number) => {
-      if (!firebaseUser) return;
+      if (!activeUid) return;
       const clamped = Math.max(0, Math.min(FITNESS_LIMITS.WATER_CUPS_MAX, cups));
       const now = Date.now();
       latestLocalUpdateRef.current = now;
@@ -333,12 +436,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return next;
       });
     },
-    [firebaseUser, syncProfileInBackground]
+    [activeUid, syncProfileInBackground]
   );
 
   const toggleDateLogged = useCallback(
     (isoDate: string) => {
-      if (!firebaseUser) return;
+      if (!activeUid) return;
       const now = Date.now();
       latestLocalUpdateRef.current = now;
       setProfile((prev) => {
@@ -359,11 +462,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return next;
       });
     },
-    [firebaseUser, syncProfileInBackground]
+    [activeUid, syncProfileInBackground]
   );
 
   const markTodayLogged = useCallback(() => {
-    if (!firebaseUser) return;
+    if (!activeUid) return;
     const today = getTodayIso();
     const now = Date.now();
     latestLocalUpdateRef.current = now;
@@ -380,17 +483,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       syncProfileInBackground(next);
       return next;
     });
-  }, [firebaseUser, syncProfileInBackground]);
+  }, [activeUid, syncProfileInBackground]);
 
   return (
     <AuthContext.Provider
       value={{
         firebaseUser,
+        activeUid,
+        isDemoUser,
+        demoResetNonce,
         profile,
         isAuthReady,
         cloudSyncNotice,
         dismissCloudSyncNotice,
         setCloudSyncNotice,
+        enterDemoMode,
+        resetDemoData,
+        exitDemoMode,
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,

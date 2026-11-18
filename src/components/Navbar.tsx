@@ -1,12 +1,22 @@
 import React from 'react';
-import { BarChart3, Dumbbell, LogOut, SlidersHorizontal, Utensils } from 'lucide-react';
+import {
+  BarChart3,
+  Dumbbell,
+  LogOut,
+  RotateCcw,
+  SlidersHorizontal,
+  Utensils,
+} from 'lucide-react';
 import type { ActiveTab, UserProfile } from '../types';
 
 interface NavbarProps {
   profile: UserProfile | null;
   activeTab: ActiveTab;
+  isDemoUser: boolean;
   onChangeTab: (tab: ActiveTab) => void;
   onLogout: () => void;
+  onResetDemo?: () => void;
+  onExitDemo?: () => void;
 }
 
 const TABS: {
@@ -24,11 +34,46 @@ const TABS: {
 export const Navbar: React.FC<NavbarProps> = ({
   profile,
   activeTab,
+  isDemoUser,
   onChangeTab,
   onLogout,
+  onResetDemo,
+  onExitDemo,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-[#FFFFFF] border-b border-[#E5E5E5]">
+      {/* Minimal Monochrome Demo Mode Banner */}
+      {isDemoUser && (
+        <div className="border-b border-[#0A0A0A] bg-[#FAFAFA]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <p className="font-mono text-[11px] tracking-wider text-[#0A0A0A]">
+              DEMO SESSION — Changes are stored locally in your browser.
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              {onResetDemo && (
+                <button
+                  type="button"
+                  onClick={onResetDemo}
+                  className="px-2.5 py-1 border border-[#E5E5E5] hover:border-[#0A0A0A] bg-white text-[#0A0A0A] font-mono text-[11px] uppercase tracking-wider rounded-[2px] transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset Demo Data</span>
+                </button>
+              )}
+              {onExitDemo && (
+                <button
+                  type="button"
+                  onClick={onExitDemo}
+                  className="px-2.5 py-1 border border-[#0A0A0A] bg-[#0A0A0A] hover:bg-[#262626] text-white font-mono text-[11px] uppercase tracking-wider rounded-[2px] transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  Exit Demo / Sign Up
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Brand Wordmark */}
         <button
@@ -94,11 +139,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
           <button
             type="button"
-            onClick={onLogout}
+            onClick={isDemoUser && onExitDemo ? onExitDemo : onLogout}
             className="px-3 py-1.5 border border-[#E5E5E5] hover:border-[#0A0A0A] bg-white text-[#0A0A0A] text-xs font-medium rounded-[2px] transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
+            <span>{isDemoUser ? 'Exit Demo' : 'Sign Out'}</span>
           </button>
         </div>
       </div>

@@ -3,6 +3,37 @@ import type { MealEntry, UserProfile, WorkoutRoutine } from '../types';
 const PROFILE_PREFIX = 'kf_profile_v1_';
 const WORKOUTS_PREFIX = 'kf_workouts_v1_';
 const MEALS_PREFIX = 'kf_meals_v1_';
+const DEMO_ACTIVE_KEY = 'kf_demo_active_v1';
+
+export function isDemoSessionStored(): boolean {
+  try {
+    return window.localStorage.getItem(DEMO_ACTIVE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setDemoSessionStored(active: boolean): void {
+  try {
+    if (active) {
+      window.localStorage.setItem(DEMO_ACTIVE_KEY, 'true');
+    } else {
+      window.localStorage.removeItem(DEMO_ACTIVE_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function clearCachedUserData(uid: string): void {
+  try {
+    window.localStorage.removeItem(`${PROFILE_PREFIX}${uid}`);
+    window.localStorage.removeItem(`${WORKOUTS_PREFIX}${uid}`);
+    window.localStorage.removeItem(`${MEALS_PREFIX}${uid}`);
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 export function loadCachedProfile(uid: string): UserProfile | null {
   try {

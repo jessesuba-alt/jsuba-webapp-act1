@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { ArrowRight, Dumbbell, Loader2, Utensils, CalendarCheck } from 'lucide-react';
+import { ArrowRight, Dumbbell, Loader2, Play, Utensils, CalendarCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const AuthPage: React.FC = () => {
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle, enterDemoMode } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -257,20 +257,37 @@ export const AuthPage: React.FC = () => {
               <div className="border-t border-[#E5E5E5] w-full" />
             </div>
 
-            <button
-              type="button"
-              onClick={handleGoogle}
-              disabled={isSubmitting}
-              className="w-full py-2.5 px-4 border border-[#E5E5E5] hover:border-[#0A0A0A] bg-white text-[#0A0A0A] text-xs font-semibold uppercase tracking-wider rounded-[2px] transition-colors flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="currentColor"
-                  d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81Z"
-                />
-              </svg>
-              <span>Continue with Google</span>
-            </button>
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleGoogle}
+                disabled={isSubmitting}
+                className="w-full py-2.5 px-4 border border-[#E5E5E5] hover:border-[#0A0A0A] bg-white text-[#0A0A0A] text-xs font-semibold uppercase tracking-wider rounded-[2px] transition-colors flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81Z"
+                  />
+                </svg>
+                <span>Continue with Google</span>
+              </button>
+
+              <div className="pt-2 border-t border-[#E5E5E5] space-y-2">
+                <button
+                  type="button"
+                  onClick={enterDemoMode}
+                  disabled={isSubmitting}
+                  className="w-full py-2.5 px-4 border border-[#0A0A0A] bg-[#FAFAFA] hover:bg-[#0A0A0A] hover:text-white text-[#0A0A0A] text-xs font-semibold uppercase tracking-wider rounded-[2px] transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Continue with Demo Account</span>
+                </button>
+                <p className="font-mono text-[11px] text-center text-[#737373]">
+                  No sign-up required · Pre-loaded sample data
+                </p>
+              </div>
+            </div>
           </div>
         </section>
       </main>
